@@ -181,12 +181,11 @@ if (audio_b64 && !isMuted && text && text.trim().length > 3) {
         ws.send(JSON.stringify({ type: "mute", muted: isMuted }));
       }
     },
-    changeLang: (newLang: string) => {
-  if (ws) {
-    ws.close();
-    ws = null;
-  }
+  changeLang: (newLang: string) => {
+  if (ws && ws.readyState === WebSocket.OPEN) ws.close();
   stopAudioLocal();
   processedHashes.clear();
   openTranslateSocket(backendBase, token, newLang, onMessage, onConnectionChange);
-}
+},
+}; // 👈 Fecha o objeto retornado
+} // 👈 Fecha a função openTranslateSocket
