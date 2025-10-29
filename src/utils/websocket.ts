@@ -13,6 +13,8 @@ export class WebSocketManager {
   private backendUrl: string;
   private onMessageCallback: (message: WebSocketMessage) => void;
   private onConnectionChange: (connected: boolean) => void;
+  private lastMessage: string | null = null;
+
 
   constructor(
     backendUrl: string,
@@ -55,16 +57,28 @@ export class WebSocketManager {
     };
 
     this.ws.onmessage = (event) => {
-      try {
-        const message: WebSocketMessage = JSON.parse(event.data);
-        if (message.audio_b64) {
-          import("@/utils/ws-audio-queue").then(mod => mod.enqueueAudioMessage(message));
-        }
-        this.onMessageCallback(message);
-      } catch (error) {
-        console.error("Erro ao processar mensagem WS:", error);
-      }
-    };
+  try {
+    const message: WebSocketMessage = JSON.parse(event.data);
+
+    // 🔎 Ignorar mensagens parciais ou curtas demais
+    if (!message.text || message.text.trim().length < 3) return;
+
+    // 🔎 Ignorar duplicatas de texto muito similares
+    if (this.lastMessage && message.text.trim() === this.lastMessage.trim()) return;
+    this.lastMessage = message.text.trim();
+
+    // 🔊 Tocar apenas se áudio estiver presente e for o final
+    if (message.audio_b64) {
+      import("@/utils/ws-audio-queue").then(mod => mod.enqueueAudioMessage(message));
+    }
+
+    // ✅ Enviar texto limpo para o front
+    this.onMessageCallback(message);
+
+  } catch (error) {
+    console.error("Erro ao processar mensagem WS:", error);
+  }
+};
 
     this.ws.onerror = (error) => {
       console.error('WebSocket error:', error);

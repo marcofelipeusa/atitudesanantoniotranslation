@@ -6,6 +6,7 @@ let playing = false;
 let currentSource: AudioBufferSourceNode | null = null;
 let isMuted = false;
 let reconnecting = false;
+let lastText = "";
 
 // Set para controle de áudios já processados
 const processedHashes = new Set<string>();
@@ -89,11 +90,11 @@ export function clearAudioQueue() {
 export function enqueueAudioMessage(message: any) {
   if (!message.audio_b64) return;
   
-  const hash = getAudioHash(message.audio_b64);
-  if (processedHashes.has(hash)) {
-    console.log("🎵 Áudio duplicado ignorado");
-    return;
-  }
+  const hash = getAudioHash((message.text || "") + message.audio_b64);
+if (processedHashes.has(hash)) {
+  console.log("🎵 Áudio duplicado ignorado:", message.text);
+  return;
+}
   
   processedHashes.add(hash);
   enqueueAudio(message.audio_b64);
@@ -113,7 +114,10 @@ export function openTranslateSocket(
   onConnectionChange?: (connected: boolean) => void
 ) {
   ensureAudioCtx();
-  if (reconnecting || ws) return ws;
+  if (ws && ws.readyState <= 1) {
+  console.log("⚠️ WS já ativo, ignorando nova conexão");
+  return ws;
+}
 
   const url = `${backendBase.replace(/\/$/, "")}/ws/translate?lang=${lang}`;
   ws = new WebSocket(url);
@@ -136,19 +140,26 @@ export function openTranslateSocket(
   };
 
   ws.onmessage = (ev) => {
-    const data = JSON.parse(ev.data);
     const { text, audio_b64, lang: langMsg } = data;
 
-    if (text && onMessage) {
-      onMessage({
-        text,
-        lang: langMsg,
-        time: new Date().toLocaleTimeString(),
-      });
-    }
+// Ignora textos curtos ou repetidos (parciais)
+if (text) {
+  const cleaned = text.trim();
+  if (cleaned.length < 3) return;
+  if (lastText === cleaned) return; // já recebido antes
+  lastText = cleaned;
 
-    if (audio_b64 && !isMuted) enqueueAudio(audio_b64);
-  };
+  onMessage?.({
+    text: cleaned,
+    lang: langMsg,
+    time: new Date().toLocaleTimeString(),
+  });
+}
+
+// Só toca o áudio se tiver texto completo e não estiver mudo
+if (audio_b64 && !isMuted && text && text.trim().length > 3) {
+  enqueueAudio(audio_b64);
+}
 
   return {
     close: () => {
@@ -171,8 +182,11 @@ export function openTranslateSocket(
       }
     },
     changeLang: (newLang: string) => {
-      if (ws && ws.readyState === WebSocket.OPEN) ws.close();
-      openTranslateSocket(backendBase, token, newLang, onMessage, onConnectionChange);
-    },
-  };
+  if (ws) {
+    ws.close();
+    ws = null;
+  }
+  stopAudioLocal();
+  processedHashes.clear();
+  openTranslateSocket(backendBase, token, newLang, onMessage, onConnectionChange);
 }
