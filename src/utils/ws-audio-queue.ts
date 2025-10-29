@@ -140,26 +140,32 @@ export function openTranslateSocket(
   };
 
   ws.onmessage = (ev) => {
-    const { text, audio_b64, lang: langMsg } = data;
+    try {
+      const data = JSON.parse(ev.data);
+      const { text, audio_b64, lang: langMsg } = data;
 
-// Ignora textos curtos ou repetidos (parciais)
-if (text) {
-  const cleaned = text.trim();
-  if (cleaned.length < 3) return;
-  if (lastText === cleaned) return; // já recebido antes
-  lastText = cleaned;
+      // Ignora textos curtos ou repetidos (parciais)
+      if (text) {
+        const cleaned = text.trim();
+        if (cleaned.length < 3) return;
+        if (lastText === cleaned) return; // já recebido antes
+        lastText = cleaned;
 
-  onMessage?.({
-    text: cleaned,
-    lang: langMsg,
-    time: new Date().toLocaleTimeString(),
-  });
-}
+        onMessage?.({
+          text: cleaned,
+          lang: langMsg,
+          time: new Date().toLocaleTimeString(),
+        });
+      }
 
-// Só toca o áudio se tiver texto completo e não estiver mudo
-if (audio_b64 && !isMuted && text && text.trim().length > 3) {
-  enqueueAudio(audio_b64);
-}
+      // Só toca o áudio se tiver texto completo e não estiver mudo
+      if (audio_b64 && !isMuted && text && text.trim().length > 3) {
+        enqueueAudio(audio_b64);
+      }
+    } catch (error) {
+      console.error("Error processing WebSocket message:", error);
+    }
+  };
 
   return {
     close: () => {
@@ -181,11 +187,11 @@ if (audio_b64 && !isMuted && text && text.trim().length > 3) {
         ws.send(JSON.stringify({ type: "mute", muted: isMuted }));
       }
     },
-  changeLang: (newLang: string) => {
-  if (ws && ws.readyState === WebSocket.OPEN) ws.close();
-  stopAudioLocal();
-  processedHashes.clear();
-  openTranslateSocket(backendBase, token, newLang, onMessage, onConnectionChange);
-},
-}; // 👈 Fecha o objeto retornado
-} // 👈 Fecha a função openTranslateSocket
+    changeLang: (newLang: string) => {
+      if (ws && ws.readyState === WebSocket.OPEN) ws.close();
+      stopAudioLocal();
+      processedHashes.clear();
+      openTranslateSocket(backendBase, token, newLang, onMessage, onConnectionChange);
+    }
+  };
+}
