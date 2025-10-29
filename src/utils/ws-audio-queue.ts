@@ -191,7 +191,7 @@ export function openTranslateSocket(
       if (ws && ws.readyState === WebSocket.OPEN) ws.close();
       stopAudioLocal();
       processedHashes.clear();
-      openTranslateSocket(backendBase, token, newLang, onMessage, onConnectionChange);
+      return openTranslateSocket(backendBase, token, newLang, onMessage, onConnectionChange);
     }
   };
 }
