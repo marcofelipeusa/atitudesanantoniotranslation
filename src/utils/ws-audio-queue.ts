@@ -39,7 +39,10 @@ function stopAudioLocal() {
 }
 
 function playNext() {
-  if (isMuted || playing || !audioQueue.length || !audioCtx) return;
+  if (isMuted || playing || !audioQueue.length || !audioCtx) {
+    console.log("⏭️ Pulando áudio: muted=", isMuted, "playing=", playing, "queueEmpty=", !audioQueue.length);
+    return;
+  }
   playing = true;
 
   const b64 = audioQueue.shift();
@@ -48,35 +51,47 @@ function playNext() {
     return;
   }
 
-  const audioData = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
-  audioCtx.decodeAudioData(audioData.buffer)
-    .then((buffer) => {
-      currentSource = audioCtx!.createBufferSource();
-      currentSource.buffer = buffer;
-      const gain = audioCtx!.createGain();
-      gain.gain.setValueAtTime(0, audioCtx!.currentTime);
-      gain.gain.linearRampToValueAtTime(1.0, audioCtx!.currentTime + 0.1);
-      currentSource.connect(gain).connect(audioCtx!.destination);
+  try {
+    console.log("🎵 Decodificando áudio...");
+    const audioData = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+    
+    audioCtx.decodeAudioData(audioData.buffer)
+      .then((buffer) => {
+        console.log("🎵 Áudio decodificado com sucesso");
+        currentSource = audioCtx!.createBufferSource();
+        currentSource.buffer = buffer;
+        const gain = audioCtx!.createGain();
+        gain.gain.setValueAtTime(0, audioCtx!.currentTime);
+        gain.gain.linearRampToValueAtTime(1.0, audioCtx!.currentTime + 0.1);
+        currentSource.connect(gain).connect(audioCtx!.destination);
 
-      // velocidade dinâmica mais natural (voz sem chipmunk)
-      // 1.0 = normal, 1.1 = fala ligeiramente rápida, 0.95 = calma
-      const baseRate = 1.0;
-      const speed = Math.max(0.9, Math.min(1.15, baseRate));
-      currentSource.playbackRate.value = speed;
+        // velocidade dinâmica mais natural (voz sem chipmunk)
+        // 1.0 = normal, 1.1 = fala ligeiramente rápida, 0.95 = calma
+        const baseRate = 1.0;
+        const speed = Math.max(0.9, Math.min(1.15, baseRate));
+        currentSource.playbackRate.value = speed;
 
-      currentSource.onended = () => {
+        currentSource.onended = () => {
+          console.log("🎵 Áudio finalizado");
+          playing = false;
+          currentSource = null;
+          if (!isMuted && audioQueue.length > 0) {
+            console.log("🎵 Próximo áudio em 60ms");
+            setTimeout(playNext, 60);
+          }
+        };
+
+        console.log("🎵 Iniciando playback");
+        currentSource.start(0);
+      })
+      .catch((err) => {
+        console.error("❌ Erro ao decodificar áudio:", err);
         playing = false;
-        currentSource = null;
-        if (!isMuted && audioQueue.length > 0) setTimeout(playNext, 60);
-      };
-
-      currentSource.start(0);
-    })
-    .catch((err) => {
-      console.error("Erro ao decodificar áudio:", err);
-      playing = false;
-    });
-}
+      });
+  } catch (err) {
+    console.error("❌ Erro ao processar áudio:", err);
+    playing = false;
+  }
 
 // Função para limpar a fila de áudio
 export function clearAudioQueue() {
@@ -101,9 +116,16 @@ if (processedHashes.has(hash)) {
 }
 
 function enqueueAudio(b64: string) {
-  if (isMuted) return;
+  if (isMuted) {
+    console.log("🔇 Áudio ignorado (mudo)");
+    return;
+  }
+  console.log("🎵 Áudio enfileirado");
   audioQueue.push(b64);
-  if (!playing) playNext();
+  if (!playing) {
+    console.log("▶️ Iniciando reprodução");
+    playNext();
+  }
 }
 
 export function openTranslateSocket(
@@ -142,7 +164,7 @@ export function openTranslateSocket(
   ws.onmessage = (ev) => {
     try {
       const data = JSON.parse(ev.data);
-      const { text, audio_b64, lang: langMsg } = data;
+      const { text, audio_b64, lang: langMsg, type } = data;
 
       // Ignora textos curtos ou repetidos (parciais)
       if (text) {
@@ -158,8 +180,9 @@ export function openTranslateSocket(
         });
       }
 
-      // Só toca o áudio se tiver texto completo e não estiver mudo
-      if (audio_b64 && !isMuted && text && text.trim().length > 3) {
+      // Processa áudio se presente no payload
+      if (audio_b64 && !isMuted) {
+        console.log("🎵 Processando áudio recebido");
         enqueueAudio(audio_b64);
       }
     } catch (error) {
