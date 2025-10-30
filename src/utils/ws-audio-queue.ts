@@ -1,4 +1,18 @@
 // ws-audio-queue.ts — versão refinada (voz natural + mute correto): 
+
+interface WebSocketMessage {
+  text?: string;
+  audio_b64?: string;
+  lang?: string;
+  type?: string;
+}
+
+interface WebSocketInstance {
+  close: () => void;
+  setMute: (mute: boolean) => void;
+  changeLang: (newLang: string) => WebSocketInstance;
+}
+
 let audioCtx: AudioContext | null = null;
 let ws: WebSocket | null = null;
 let audioQueue: string[] = [];
@@ -11,7 +25,6 @@ let lastText = "";
 // Set para controle de áudios já processados
 const processedHashes = new Set<string>();
 
-// Hash simples para deduplicação de áudio
 function getAudioHash(b64: string): string {
   let hash = 0;
   for (let i = 0; i < b64.length; i++) {
@@ -65,8 +78,6 @@ function playNext() {
         gain.gain.linearRampToValueAtTime(1.0, audioCtx!.currentTime + 0.1);
         currentSource.connect(gain).connect(audioCtx!.destination);
 
-        // velocidade dinâmica mais natural (voz sem chipmunk)
-        // 1.0 = normal, 1.1 = fala ligeiramente rápida, 0.95 = calma
         const baseRate = 1.0;
         const speed = Math.max(0.9, Math.min(1.15, baseRate));
         currentSource.playbackRate.value = speed;
@@ -92,8 +103,8 @@ function playNext() {
     console.error("❌ Erro ao processar áudio:", err);
     playing = false;
   }
+}
 
-// Função para limpar a fila de áudio
 export function clearAudioQueue() {
   stopAudioLocal();
   audioQueue = [];
@@ -101,15 +112,14 @@ export function clearAudioQueue() {
   console.log("🧹 Fila de áudio limpa");
 }
 
-// Processa mensagens com áudio da fila central
-export function enqueueAudioMessage(message: any) {
+export function enqueueAudioMessage(message: WebSocketMessage) {
   if (!message.audio_b64) return;
   
   const hash = getAudioHash((message.text || "") + message.audio_b64);
-if (processedHashes.has(hash)) {
-  console.log("🎵 Áudio duplicado ignorado:", message.text);
-  return;
-}
+  if (processedHashes.has(hash)) {
+    console.log("🎵 Áudio duplicado ignorado:", message.text);
+    return;
+  }
   
   processedHashes.add(hash);
   enqueueAudio(message.audio_b64);
@@ -134,12 +144,23 @@ export function openTranslateSocket(
   lang: string,
   onMessage: (msg: any) => void,
   onConnectionChange?: (connected: boolean) => void
-) {
+): WebSocketInstance {
   ensureAudioCtx();
+  
   if (ws && ws.readyState <= 1) {
-  console.log("⚠️ WS já ativo, ignorando nova conexão");
-  return ws;
-}
+    console.log("⚠️ WS já ativo, ignorando nova conexão");
+    return {
+      close: () => {
+        if (ws && ws.readyState === WebSocket.OPEN) ws.close();
+        stopAudioLocal();
+      },
+      setMute: (mute: boolean) => {
+        isMuted = mute;
+        if (mute) stopAudioLocal();
+      },
+      changeLang: (newLang: string) => openTranslateSocket(backendBase, token, newLang, onMessage, onConnectionChange)
+    };
+  }
 
   const url = `${backendBase.replace(/\/$/, "")}/ws/translate?lang=${lang}`;
   ws = new WebSocket(url);
@@ -163,14 +184,14 @@ export function openTranslateSocket(
 
   ws.onmessage = (ev) => {
     try {
-      const data = JSON.parse(ev.data);
-      const { text, audio_b64, lang: langMsg, type } = data;
+      const data = JSON.parse(ev.data) as WebSocketMessage;
+      const { text, audio_b64, lang: langMsg } = data;
 
       // Ignora textos curtos ou repetidos (parciais)
       if (text) {
         const cleaned = text.trim();
         if (cleaned.length < 3) return;
-        if (lastText === cleaned) return; // já recebido antes
+        if (lastText === cleaned) return;
         lastText = cleaned;
 
         onMessage?.({
@@ -199,7 +220,7 @@ export function openTranslateSocket(
     setMute: (mute: boolean) => {
       isMuted = mute;
       if (mute) {
-        stopAudioLocal(); // só pausa local, não fecha WS
+        stopAudioLocal();
         console.log("🔇 Mudo localmente (WS ativo)");
       } else {
         ensureAudioCtx();
