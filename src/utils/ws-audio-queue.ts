@@ -1,4 +1,10 @@
 // ws-audio-queue.ts — versão refinada (voz natural + mute correto): 
+declare global {
+  interface Window {
+    AudioContext: typeof AudioContext;
+    webkitAudioContext: typeof AudioContext;
+  }
+}
 
 interface WebSocketMessage {
   text?: string;
